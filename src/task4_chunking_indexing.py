@@ -31,7 +31,7 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 EMBEDDING_DIM = 1024
 
 VECTOR_STORE = "chromadb"
-COLLECTION_NAME = "university_services_docs"
+COLLECTION_NAME = "ielts_writing_docs_v3"
 
 _MODEL_CACHE = None
 _MODEL_LOAD_ATTEMPTED = False
@@ -186,13 +186,28 @@ def load_documents() -> list[dict]:
         List of {'content': str, 'metadata': {'source': str, 'type': str}}
     """
     documents = []
-    standardized_files = sorted(STANDARDIZED_DIR.rglob("*.md")) if STANDARDIZED_DIR.exists() else []
-    source_dir = STANDARDIZED_DIR if standardized_files else PROCESSED_DIR
-    markdown_files = standardized_files or (
+    standardized_files = (
+        sorted(STANDARDIZED_DIR.rglob("*.md")) if STANDARDIZED_DIR.exists() else []
+    )
+    processed_files = (
         sorted(PROCESSED_DIR.rglob("*.md")) if PROCESSED_DIR.exists() else []
     )
 
-    for md_file in markdown_files:
+    def canonical_stem(path: Path) -> str:
+        return re.sub(r"[-_\s]+", "", path.stem.casefold())
+
+    # Curated files in data/processed have clean headings and list structure.
+    # Prefer them over duplicate raw PDF conversions in data/standardized, whose
+    # table columns can be interleaved and separate a band number from its rubric.
+    processed_stems = {canonical_stem(path) for path in processed_files}
+    selected_files: list[tuple[Path, Path]] = [
+        (path, STANDARDIZED_DIR)
+        for path in standardized_files
+        if canonical_stem(path) not in processed_stems
+    ]
+    selected_files.extend((path, PROCESSED_DIR) for path in processed_files)
+
+    for md_file, source_dir in selected_files:
         content = md_file.read_text(encoding="utf-8")
         if not content.strip():
             continue
@@ -218,28 +233,53 @@ def chunk_documents(documents: list[dict]) -> list[dict]:
         List of {'content': str, 'metadata': dict}
     """
     try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter  # type: ignore
+        from langchain_text_splitters import (  # type: ignore
+            MarkdownHeaderTextSplitter,
+            RecursiveCharacterTextSplitter,
+        )
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+        markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ("#", "heading_1"),
+                ("##", "heading_2"),
+                ("###", "heading_3"),
+                ("####", "heading_4"),
+            ],
+            strip_headers=False,
+        )
     except Exception:
         splitter = None
+        markdown_splitter = None
 
     chunks = []
     for doc in documents:
-        if splitter:
-            splits = splitter.split_text(doc["content"])
+        if splitter and markdown_splitter:
+            sections = markdown_splitter.split_text(doc["content"])
+            split_entries = []
+            for section in sections:
+                for text in splitter.split_text(section.page_content):
+                    split_entries.append((text, section.metadata))
         else:
             text = doc["content"]
-            splits = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP)]
+            raw_splits = [
+                text[i:i+CHUNK_SIZE]
+                for i in range(0, len(text), CHUNK_SIZE - CHUNK_OVERLAP)
+            ]
+            split_entries = [(text, {}) for text in raw_splits]
 
-        for i, chunk_text in enumerate(splits):
+        for i, (chunk_text, header_metadata) in enumerate(split_entries):
             if chunk_text.strip():
                 chunks.append({
                     "content": chunk_text,
-                    "metadata": {**doc["metadata"], "chunk_index": i}
+                    "metadata": {
+                        **doc["metadata"],
+                        **header_metadata,
+                        "chunk_index": i,
+                    }
                 })
     return chunks
 

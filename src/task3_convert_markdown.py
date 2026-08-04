@@ -26,22 +26,32 @@ OUTPUT_DIR = Path(__file__).parent.parent / "data" / "standardized"
 
 
 def convert_legal_docs():
-    """Convert PDF/DOCX files trong data/landing/legal/ sang markdown."""
+    """Convert all PDF/DOCX files in data/landing/legal recursively."""
     legal_dir = LANDING_DIR / "legal"
     output_dir = OUTPUT_DIR / "legal"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     md = MarkItDown()
 
-    for filepath in legal_dir.iterdir():
-        if filepath.suffix.lower() in (".pdf", ".docx", ".doc"):
-            print(f"Converting: {filepath.name}")
-            # TODO: Convert và lưu file
-            # result = md.convert(str(filepath))
-            # output_path = output_dir / f"{filepath.stem}.md"
-            # output_path.write_text(result.text_content, encoding="utf-8")
-            # print(f"  ✓ Saved: {output_path}")
-            raise NotImplementedError("Implement convert_legal_docs")
+    for filepath in legal_dir.rglob("*"):
+        if (
+            filepath.is_file()
+            and filepath.suffix.lower() in {".pdf", ".doc", ".docx"}
+        ):
+            print(f"Converting: {filepath.relative_to(legal_dir)}")
+
+            try:
+                result = md.convert(str(filepath))
+
+                relative = filepath.relative_to(legal_dir).with_suffix(".md")
+                output_path = output_dir / relative
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                output_path.write_text(result.text_content, encoding="utf-8")
+                print(f"  ✓ Saved: {output_path}")
+
+            except Exception as e:
+                print(f"  ✗ Failed: {filepath.name}: {e}")
 
 
 def convert_news_articles():

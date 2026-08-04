@@ -77,36 +77,7 @@ def rerank_mmr(
     Returns:
         List of top_k candidates selected by MMR.
     """
-    # TODO: Implement MMR
-    #
-    # selected = []
-    # remaining = list(range(len(candidates)))
-    #
-    # for _ in range(min(top_k, len(candidates))):
-    #     best_idx = None
-    #     best_score = float('-inf')
-    #
-    #     for idx in remaining:
-    #         # Relevance to query
-    #         relevance = cosine_sim(query_embedding, candidates[idx]["embedding"])
-    #
-    #         # Max similarity to already selected
-    #         max_sim_to_selected = 0
-    #         for sel_idx in selected:
-    #             sim = cosine_sim(candidates[idx]["embedding"], candidates[sel_idx]["embedding"])
-    #             max_sim_to_selected = max(max_sim_to_selected, sim)
-    #
-    #         # MMR score
-    #         mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim_to_selected
-    #
-    #         if mmr_score > best_score:
-    #             best_score = mmr_score
-    #             best_idx = idx
-    #
-    #     selected.append(best_idx)
-    #     remaining.remove(best_idx)
-    #
-    # return [candidates[i] for i in selected]
+    # TODO: Implement MMR (optional — dùng RRF thay thế)
     raise NotImplementedError("Implement rerank_mmr")
 
 
@@ -116,38 +87,43 @@ def rerank_rrf(
     """
     Reciprocal Rank Fusion — gộp kết quả từ nhiều ranker.
 
-    RRF(d) = Σ 1 / (k + rank_r(d))
+    Công thức: RRF(d) = Σ 1 / (k + rank_r(d))
+    Trong đó:
+        - k = 60 (smoothing constant, từ paper Cormack et al. 2009)
+        - rank_r(d) = thứ hạng của document d trong ranked list r (bắt đầu từ 1)
+
+    Ví dụ: document xuất hiện ở rank 1 trong cả 2 list:
+        RRF = 1/(60+1) + 1/(60+1) = 2/61 ≈ 0.0328
 
     Args:
         ranked_lists: List of ranked result lists (mỗi list từ 1 ranker)
         top_k: Số lượng kết quả cuối cùng
-        k: Smoothing constant (default=60, từ paper Cormack et al. 2009)
+        k: Smoothing constant (default=60)
 
     Returns:
         List of top_k candidates sorted by RRF score descending.
     """
-    # TODO: Implement RRF
-    #
-    # rrf_scores = {}  # content -> score
-    # content_map = {}  # content -> full dict
-    #
-    # for ranked_list in ranked_lists:
-    #     for rank, item in enumerate(ranked_list, 1):
-    #         key = item["content"]
-    #         rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (k + rank)
-    #         content_map[key] = item
-    #
-    # # Sort by RRF score
-    # sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-    #
-    # results = []
-    # for content, score in sorted_items[:top_k]:
-    #     item = content_map[content].copy()
-    #     item["score"] = score
-    #     results.append(item)
-    #
-    # return results
-    raise NotImplementedError("Implement rerank_rrf")
+    rrf_scores: dict[str, float] = {}    # content → accumulated RRF score
+    content_map: dict[str, dict] = {}    # content → full dict (giữ metadata)
+
+    for ranked_list in ranked_lists:
+        for rank, item in enumerate(ranked_list, 1):
+            key = item["content"]
+            rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (k + rank)
+            # Giữ phiên bản đầu tiên gặp (ưu tiên ranker đầu = semantic)
+            if key not in content_map:
+                content_map[key] = item
+
+    # Sort by RRF score descending
+    sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+
+    results = []
+    for content, score in sorted_items[:top_k]:
+        item = content_map[content].copy()
+        item["score"] = score
+        results.append(item)
+
+    return results
 
 
 # =============================================================================
@@ -163,6 +139,12 @@ def rerank(
     """
     Unified reranking interface.
 
+    Khi method="rrf" và nhận 1 candidate list (từ test hoặc pipeline đơn giản):
+    → Sort candidates theo score gốc để tạo ranked list, rồi áp dụng RRF.
+
+    Khi cần merge nhiều nguồn (semantic + BM25), gọi trực tiếp rerank_rrf()
+    với nhiều ranked lists — xem Task 9 pipeline.
+
     Args:
         query: Câu truy vấn
         candidates: Danh sách candidates từ retrieval
@@ -175,22 +157,53 @@ def rerank(
     if method == "cross_encoder":
         return rerank_cross_encoder(query, candidates, top_k)
     elif method == "mmr":
-        # Cần query_embedding - embed query trước
+        # Cần query_embedding — gọi rerank_mmr() trực tiếp
         raise NotImplementedError("Call rerank_mmr with query_embedding")
     elif method == "rrf":
-        # RRF cần nhiều ranked lists - gọi riêng
-        raise NotImplementedError("Call rerank_rrf with ranked_lists")
+        # Sort candidates theo score gốc → tạo 1 ranked list → áp dụng RRF
+        sorted_candidates = sorted(
+            candidates, key=lambda x: x.get("score", 0), reverse=True
+        )
+        return rerank_rrf([sorted_candidates], top_k=top_k)
     else:
         raise ValueError(f"Unknown rerank method: {method}")
 
 
 if __name__ == "__main__":
-    # Test with dummy data
+    import sys
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    print("=" * 60)
+    print("Task 7: RRF Reranking")
+    print("=" * 60)
+
+    # ── Test 1: rerank() unified interface (single candidate list) ──
     dummy_candidates = [
         {"content": "Tuition fee payment schedule", "score": 0.8, "metadata": {}},
         {"content": "Scholarship eligibility requirements", "score": 0.6, "metadata": {}},
         {"content": "Library study room booking guide", "score": 0.5, "metadata": {}},
     ]
+
+    print("\n[INFO] Test 1: rerank() with single candidate list")
     results = rerank("tuition fee payment", dummy_candidates, top_k=2)
     for r in results:
-        print(f"[{r['score']:.3f}] {r['content']}")
+        print(f"  [{r['score']:.4f}] {r['content']}")
+
+    # ── Test 2: rerank_rrf() with multiple ranked lists (semantic + BM25) ──
+    semantic_results = [
+        {"content": "Tuition fee payment schedule", "score": 0.9, "metadata": {}},
+        {"content": "Scholarship eligibility", "score": 0.7, "metadata": {}},
+        {"content": "Library study room guide", "score": 0.5, "metadata": {}},
+    ]
+    bm25_results = [
+        {"content": "Scholarship eligibility", "score": 5.2, "metadata": {}},
+        {"content": "Tuition fee payment schedule", "score": 3.1, "metadata": {}},
+        {"content": "Campus parking regulations", "score": 2.8, "metadata": {}},
+    ]
+
+    print("\n[INFO] Test 2: rerank_rrf() with 2 ranked lists (Semantic + BM25)")
+    results = rerank_rrf([semantic_results, bm25_results], top_k=3)
+    for r in results:
+        print(f"  [{r['score']:.4f}] {r['content']}")
+    print(f"\n  [NOTE] max RRF score ~= {2/(60+1):.4f} (2 lists, rank 1 ca 2)")

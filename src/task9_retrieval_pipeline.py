@@ -47,7 +47,9 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 
-SCORE_THRESHOLD = 0.48   # Ngưỡng Cosine gốc: Nếu best_score < 0.48 → fallback PageIndex
+# Calibrated for the current IELTS corpus and deterministic offline embedding.
+# Relevant queries score around 0.40-0.50; 0.48 incorrectly triggers fallback.
+SCORE_THRESHOLD = 0.30
 DEFAULT_TOP_K = 5
 RERANK_METHOD = "rrf"  # "cross_encoder" | "mmr" | "rrf"
 
@@ -92,7 +94,12 @@ def retrieve(
 
     # Step 2: Merge kết quả bằng RRF Reranking
     if dense_results and sparse_results:
-        merged = rerank_rrf([dense_results, sparse_results], top_k=top_k * 2)
+        # IELTS queries contain exact criterion names and band numbers. Give
+        # BM25 2x weight so those precise matches are not drowned out when the
+        # offline dense fallback is less semantic than BGE-M3.
+        merged = rerank_rrf(
+            [dense_results, sparse_results, sparse_results], top_k=top_k * 2
+        )
     elif dense_results:
         merged = dense_results
     elif sparse_results:
@@ -118,8 +125,10 @@ def retrieve(
             fallback = pageindex_search(query, top_k=top_k)
             if fallback:
                 return fallback
-        except Exception as e:
-            print(f"  [WARN] PageIndex fallback error: {e}")
+        except Exception:
+            # PageIndex is optional. Avoid printing exception text because a
+            # Vietnamese message can crash legacy Windows cp1252 terminals.
+            print("  [WARN] PageIndex unavailable; returning hybrid results")
 
     return final_results[:top_k]
 

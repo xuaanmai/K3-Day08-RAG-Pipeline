@@ -1,8 +1,6 @@
-"""
-RAG Chatbot — University Services (Starter Template)
-Streamlit app kết nối RAG Retrieval (Task 9) và Generation (Task 10).
+"""IELTS Writing Band Descriptor RAG chatbot UI.
 
-Chạy:
+Run:
     streamlit run app.py
 """
 
@@ -13,139 +11,230 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv()
 
-# Thêm project root vào sys.path để import các task từ src/
-PROJECT_ROOT = Path(__file__).parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# =============================================================================
-# PAGE CONFIG
-# =============================================================================
+ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT / ".env")
 
 st.set_page_config(
-    page_title="University Services RAG Chatbot",
-    page_icon="🎓",
+    page_title="IELTS Writing Lab",
+    page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# =============================================================================
-# SIDEBAR — INFO & SETTINGS
-# =============================================================================
+st.markdown(
+    """
+<style>
+:root {
+  --ink:#17221c; --forest:#123d2d; --forest-2:#1d5841;
+  --lime:#cef36d; --paper:#faf9f3; --muted:#68746d; --line:#dfe6df;
+}
+.stApp {
+  background: radial-gradient(circle at 88% 4%,rgba(206,243,109,.22),transparent 25rem),
+              linear-gradient(180deg,#fbfaf6,#f4f7f3);
+  color:var(--ink);
+}
+html,body,[class*="css"] {font-family:Inter,"Segoe UI",sans-serif}
+h1,h2,h3 {letter-spacing:-.035em!important}
+[data-testid="stSidebar"] {background:var(--forest);border:0}
+[data-testid="stSidebar"] * {color:#f4f7f4}
+[data-testid="stSidebar"] .stCaptionContainer {color:#b9c9bf}
+[data-testid="stSidebar"] hr {border-color:rgba(255,255,255,.12)}
+[data-testid="stSidebar"] .stButton button {
+  min-height:43px;text-align:left;border-radius:12px;color:#edf4ef;
+  background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.13)
+}
+[data-testid="stSidebar"] .stButton button:hover {
+  color:var(--ink);background:var(--lime);border-color:var(--lime)
+}
+.logo {display:grid;place-items:center;width:44px;height:44px;margin-bottom:14px;
+  border-radius:14px;background:var(--lime);color:var(--forest);font-size:23px;font-weight:800}
+.hero {padding:32px 36px;margin:4px 0 22px;border:1px solid rgba(18,61,45,.1);
+  border-radius:25px;background:rgba(255,255,255,.75);box-shadow:0 18px 55px rgba(34,59,45,.07)}
+.eyebrow {color:#3f7058;font-size:.76rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.hero h1 {margin:8px 0 10px;font-size:clamp(2.15rem,4vw,3.8rem);line-height:1.06;color:var(--ink)}
+.hero p {max-width:760px;margin:0;color:var(--muted);font-size:1.04rem;line-height:1.65}
+.pills {display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.pill {display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);
+  border-radius:99px;background:#fff;color:#425047;font-size:.81rem;font-weight:650}
+.dot {width:7px;height:7px;border-radius:50%;background:#53a675}.dot.warn{background:#dfa642}
+.criterion {height:100%;padding:16px;border:1px solid var(--line);border-radius:17px;background:rgba(255,255,255,.72)}
+.criterion b {color:var(--forest)} .criterion span {display:block;margin-top:5px;color:var(--muted);font-size:.84rem}
+[data-testid="stChatMessage"] {padding:1.05rem 1.15rem;margin-bottom:.8rem;border:1px solid var(--line);
+  border-radius:18px;background:rgba(255,255,255,.88);box-shadow:0 8px 28px rgba(45,63,52,.045)}
+[data-testid="stChatInput"] {border-radius:17px;box-shadow:0 12px 36px rgba(28,52,40,.11)}
+[data-testid="stExpander"] {border:1px solid var(--line);border-radius:14px;background:#fff}
+.source {padding:11px 13px;margin:8px 0;border-left:3px solid #72a985;border-radius:0 10px 10px 0;background:#f5f8f5}
+.source b {color:#263a2e}.source small {color:#718078}
+.welcome {padding:23px;border:1px dashed #cbd6cd;border-radius:17px;text-align:center;color:#68756c;background:rgba(255,255,255,.42)}
+#MainMenu,footer {visibility:hidden}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-with st.sidebar:
-    st.title("🎓 University Services RAG")
-    st.caption("Trợ lý hỏi đáp về dịch vụ và chính sách đại học (học phí, học bổng, ký túc xá, thư viện)")
-
-    st.divider()
-
-    st.subheader("💡 Câu hỏi gợi ý")
-    suggestions = [
-        "Học phí tại RMIT Vietnam là bao nhiêu?",
-        "Làm sao để đặt phòng học nhóm ở thư viện?",
-        "Điều kiện xin học bổng Academic Achievement?",
-        "Dịch vụ hỗ trợ chỗ ở cho sinh viên như thế nào?",
-        "Cách đăng ký học phần qua myRMIT?",
-    ]
-    for s in suggestions:
-        if st.button(s, use_container_width=True, key=f"sug_{s[:20]}"):
-            st.session_state["pending_query"] = s
-
-    st.divider()
-    st.subheader("⚙️ Thiết lập")
-    top_k = st.slider("Số chunks retrieval (top_k)", 3, 10, 5)
-
-    st.divider()
-    st.caption("**Kiến trúc hệ thống:**")
-    st.caption("Hybrid Retrieval (Semantic + BM25) → RRF Rerank → PageIndex Fallback → LLM Generation có Citation")
-
-# =============================================================================
-# SESSION STATE
-# =============================================================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
 
-# =============================================================================
-# MAIN CHAT AREA
-# =============================================================================
 
-st.title("🎓 University Services RAG Chatbot")
-st.caption("Hệ thống hỏi đáp thông tin dịch vụ đại học (Học phí, Học bổng, Ký túc xá, Thư viện)")
+def _source_info(item: dict, index: int) -> tuple[str, str, float]:
+    metadata = item.get("metadata") or {}
+    name = (
+        metadata.get("title")
+        or metadata.get("source")
+        or metadata.get("filename")
+        or item.get("title")
+        or f"Tài liệu {index}"
+    )
+    kind = metadata.get("document_type") or metadata.get("type") or "IELTS Writing"
+    try:
+        score = float(item.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0.0
+    return str(name), str(kind), score
 
-# Hiển thị lịch sử chat
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if msg["role"] == "assistant" and "sources" in msg and msg["sources"]:
-            with st.expander(f"📚 Nguồn tham khảo ({len(msg['sources'])} chunks)"):
-                for i, src in enumerate(msg["sources"], 1):
-                    meta = src.get("metadata", {})
-                    source_name = meta.get("source", "Unknown")
-                    doc_type = meta.get("type", "unknown")
-                    score = src.get("score", 0)
-                    st.markdown(f"**[{i}] {source_name}** `{doc_type}` | score: `{score:.4f}`")
-                    st.text(src.get("content", "")[:300] + "...")
-                    st.divider()
 
-# =============================================================================
-# QUERY HANDLING
-# =============================================================================
+def render_sources(sources: list[dict]) -> None:
+    if not sources:
+        return
+    with st.expander(f"Bằng chứng sử dụng · {len(sources)} đoạn"):
+        for index, item in enumerate(sources, 1):
+            name, kind, score = _source_info(item, index)
+            st.markdown(
+                f'<div class="source"><b>[{index}] {name}</b><br>'
+                f'<small>{kind} · relevance {score:.3f}</small></div>',
+                unsafe_allow_html=True,
+            )
+            excerpt = str(item.get("content", "")).strip()
+            if excerpt:
+                st.caption(excerpt[:440] + ("…" if len(excerpt) > 440 else ""))
 
-# Xử lý khi bấm nút gợi ý hoặc nhập câu hỏi mới
-user_input = st.chat_input("Nhập câu hỏi của bạn về chính sách/dịch vụ đại học...")
-query = user_input or st.session_state.pending_query
+
+with st.sidebar:
+    st.markdown('<div class="logo">✦</div>', unsafe_allow_html=True)
+    st.title("IELTS Writing Lab")
+    st.caption("Tra cứu tiêu chí chấm điểm và phân tích bài mẫu dựa trên nguồn IELTS chính thức.")
+
+    st.divider()
+    st.subheader("Truy vấn mẫu")
+    suggestions = [
+        "Sự khác biệt giữa Band 6 và Band 7 ở Lexical Resource Task 2 là gì?",
+        "Cho ví dụ về cohesive devices đạt Band 8 trong bài Cause and Effect.",
+        "Band 8 Task Response cần đáp ứng những điều kiện nào?",
+        "Vì sao bài essay mẫu này chưa đạt Band 8?",
+    ]
+    for i, suggestion in enumerate(suggestions):
+        if st.button(suggestion, key=f"suggestion_{i}", use_container_width=True):
+            st.session_state.pending_query = suggestion
+
+    st.divider()
+    st.subheader("Thiết lập")
+    task_scope = st.selectbox("Phạm vi", ["Task 2", "Task 1", "Cả hai"])
+    top_k = st.slider("Số đoạn bằng chứng", 3, 10, 5)
+    debug = st.toggle("Hiện thông tin kỹ thuật", False)
+    if st.button("Xoá cuộc trò chuyện", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.pending_query = None
+        st.rerun()
+
+    st.divider()
+    st.caption("Band Descriptors · Essay Samples · Examiner Comments")
+
+
+has_key = bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY"))
+key_class = "" if has_key else "warn"
+key_text = "LLM đã cấu hình" if has_key else "Chưa có LLM API key"
+
+st.markdown(
+    f"""
+<section class="hero">
+  <div class="eyebrow">IELTS Writing · Evidence-first assistant</div>
+  <h1>Hiểu band score.<br>Viết có chiến lược.</h1>
+  <p>Đối chiếu tiêu chí Band 6–9, giải thích điểm mạnh và điểm giới hạn của essay mẫu,
+  đồng thời dẫn lại đúng bằng chứng từ band descriptors và nhận xét examiner.</p>
+  <div class="pills">
+    <span class="pill"><span class="dot"></span>Official descriptors</span>
+    <span class="pill"><span class="dot"></span>Hybrid RAG</span>
+    <span class="pill"><span class="dot {key_class}"></span>{key_text}</span>
+  </div>
+</section>
+""",
+    unsafe_allow_html=True,
+)
+
+cols = st.columns(4)
+criteria = [
+    ("Task Response", "Trả lời đúng, đủ và phát triển lập luận"),
+    ("Coherence & Cohesion", "Tổ chức ý, đoạn văn và liên kết"),
+    ("Lexical Resource", "Độ rộng, chính xác và tự nhiên của từ vựng"),
+    ("Grammar", "Độ đa dạng và chính xác của cấu trúc"),
+]
+for col, (name, description) in zip(cols, criteria):
+    with col:
+        st.markdown(
+            f'<div class="criterion"><b>{name}</b><span>{description}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+st.write("")
+if not st.session_state.messages:
+    st.markdown(
+        '<div class="welcome">Chọn câu hỏi mẫu hoặc nhập một câu hỏi về IELTS Writing bên dưới.</div>',
+        unsafe_allow_html=True,
+    )
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            render_sources(message.get("sources", []))
+            if debug and message.get("retrieval_source"):
+                st.caption(f"Retrieval route: `{message['retrieval_source']}`")
+
+typed_query = st.chat_input("Hỏi về Band 6–9, bốn tiêu chí chấm điểm hoặc essay mẫu…")
+query = typed_query or st.session_state.pending_query
 
 if query:
     st.session_state.pending_query = None
-
-    # Hiển thị câu hỏi của user
+    scoped_query = f"[Phạm vi IELTS Writing {task_scope}] {query}"
     st.session_state.messages.append({"role": "user", "content": query})
+
     with st.chat_message("user"):
         st.markdown(query)
 
-    # Sinh câu trả lời từ RAG Pipeline
     with st.chat_message("assistant"):
-        with st.spinner("Đang tìm kiếm tài liệu và tổng hợp câu trả lời..."):
+        with st.status("Đang đối chiếu band descriptors…", expanded=False) as status:
             try:
-                # TODO (Học viên): Tích hợp hàm sinh câu trả lời từ Task 10
-                # Ví dụ:
-                # from src.task10_generation import generate_with_citation
-                # response = generate_with_citation(query, top_k=top_k)
-                # answer = response["answer"]
-                # sources = response.get("sources", [])
-
-                # Tạm thời mockup để test UI:
                 from src.task10_generation import generate_with_citation
-                response = generate_with_citation(query, top_k=top_k)
-                answer = response.get("answer", "Chưa thể trả lời.")
-                sources = response.get("sources", [])
 
+                response = generate_with_citation(scoped_query, top_k=top_k)
+                answer = response.get("answer") or "Không tìm thấy đủ bằng chứng để trả lời."
+                sources = response.get("sources") or []
+                route = response.get("retrieval_source", "unknown")
+                status.update(label="Đã tổng hợp câu trả lời", state="complete")
             except NotImplementedError:
-                answer = "⚠️ **Task 10 chưa được implement.** Hãy hoàn thành `src/task10_generation.py` để kết nối pipeline vào UI!"
-                sources = []
-            except Exception as e:
-                answer = f"❌ **Lỗi khi chạy RAG Pipeline:** {e}"
-                sources = []
+                answer = (
+                    "Giao diện đã sẵn sàng nhưng pipeline sinh câu trả lời trong "
+                    "`src/task9_retrieval_pipeline.py` và `src/task10_generation.py` chưa hoàn thiện."
+                )
+                sources, route = [], "not_implemented"
+                status.update(label="Pipeline RAG chưa hoàn thiện", state="error")
+            except Exception as exc:
+                answer = "Không thể chạy pipeline. Hãy kiểm tra ChromaDB, embedding model và API key trong `.env`."
+                sources, route = [], "error"
+                status.update(label="Có lỗi khi chạy pipeline", state="error")
+                if debug:
+                    st.exception(exc)
 
-            st.markdown(answer)
+        st.markdown(answer)
+        render_sources(sources)
+        if debug:
+            st.caption(f"Retrieval route: `{route}`")
 
-            if sources:
-                with st.expander(f"📚 Nguồn tham khảo ({len(sources)} chunks)"):
-                    for i, src in enumerate(sources, 1):
-                        meta = src.get("metadata", {})
-                        source_name = meta.get("source", "Unknown")
-                        doc_type = meta.get("type", "unknown")
-                        score = src.get("score", 0)
-                        st.markdown(f"**[{i}] {source_name}** `{doc_type}` | score: `{score:.4f}`")
-                        st.text(src.get("content", "")[:300] + "...")
-                        st.divider()
-
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": answer,
-        "sources": sources,
-    })
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "sources": sources, "retrieval_source": route}
+    )

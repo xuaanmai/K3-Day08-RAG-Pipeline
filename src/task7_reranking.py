@@ -154,28 +154,50 @@ def rerank_rrf(
     Returns:
         List of top_k candidates sorted by RRF score descending.
     """
-    # TODO: Implement RRF
-    #
-    # rrf_scores = {}  # content -> score
-    # content_map = {}  # content -> full dict
-    #
-    # for ranked_list in ranked_lists:
-    #     for rank, item in enumerate(ranked_list, 1):
-    #         key = item["content"]
-    #         rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (k + rank)
-    #         content_map[key] = item
-    #
-    # # Sort by RRF score
-    # sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-    #
-    # results = []
-    # for content, score in sorted_items[:top_k]:
-    #     item = content_map[content].copy()
-    #     item["score"] = score
-    #     results.append(item)
-    #
-    # return results
-    raise NotImplementedError("Implement rerank_rrf")
+    if top_k <= 0 or not ranked_lists:
+        return []
+    if k < 0:
+        raise ValueError("k must be greater than or equal to 0")
+
+    rrf_scores: dict[str, float] = {}
+    content_map: dict[str, dict] = {}
+    first_seen: dict[str, int] = {}
+    seen_order = 0
+
+    for ranked_list in ranked_lists:
+        if not ranked_list:
+            continue
+
+        # Một document chỉ được đóng góp một lần trong mỗi ranked list. Điều này
+        # tránh việc dữ liệu trùng lặp trong cùng retriever làm tăng điểm giả tạo.
+        seen_in_list: set[str] = set()
+        for rank, item in enumerate(ranked_list, start=1):
+            content = item.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            if content in seen_in_list:
+                continue
+            seen_in_list.add(content)
+
+            rrf_scores[content] = rrf_scores.get(content, 0.0) + 1.0 / (k + rank)
+            if content not in content_map:
+                # Giữ phiên bản xuất hiện ở thứ hạng cao nhất đầu tiên; thường đây
+                # là bản có metadata/score gốc đáng tin cậy nhất.
+                content_map[content] = item
+                first_seen[content] = seen_order
+                seen_order += 1
+
+    ordered_contents = sorted(
+        rrf_scores,
+        key=lambda content: (-rrf_scores[content], first_seen[content]),
+    )
+
+    results = []
+    for content in ordered_contents[:top_k]:
+        result = content_map[content].copy()
+        result["score"] = rrf_scores[content]
+        results.append(result)
+    return results
 
 
 # =============================================================================
@@ -200,14 +222,19 @@ def rerank(
     Returns:
         List of top_k reranked candidates.
     """
-    if method == "cross_encoder":
+    if top_k <= 0 or not candidates:
+        return []
+
+    normalized_method = method.strip().lower()
+    if normalized_method == "cross_encoder":
         return rerank_cross_encoder(query, candidates, top_k)
-    elif method == "mmr":
+    elif normalized_method == "mmr":
         # Cần query_embedding - embed query trước
         raise NotImplementedError("Call rerank_mmr with query_embedding")
-    elif method == "rrf":
-        # RRF cần nhiều ranked lists - gọi riêng
-        raise NotImplementedError("Call rerank_rrf with ranked_lists")
+    elif normalized_method == "rrf":
+        # Interface này nhận một ranked list. Trong hybrid pipeline, hãy gọi
+        # rerank_rrf([dense_results, sparse_results]) trực tiếp để fuse nhiều list.
+        return rerank_rrf([candidates], top_k=top_k)
     else:
         raise ValueError(f"Unknown rerank method: {method}")
 

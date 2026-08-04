@@ -2,13 +2,22 @@
 Task 4 — Chunking & Indexing vào Vector Store.
 """
 
+import hashlib
 import math
 import json
+import os
+import re
 from pathlib import Path
 
 STANDARDIZED_DIR = Path(__file__).parent.parent / "data" / "standardized"
 PROCESSED_DIR = Path(__file__).parent.parent / "data" / "processed"
 CHROMA_DIR = Path(__file__).parent.parent / "chroma_db"
+MODEL_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "huggingface"
+
+# Keep model downloads inside the writable project instead of the user profile.
+os.environ.setdefault("HF_HOME", str(MODEL_CACHE_DIR))
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(MODEL_CACHE_DIR / "hub"))
+os.environ.setdefault("TRANSFORMERS_CACHE", str(MODEL_CACHE_DIR / "transformers"))
 
 # =============================================================================
 # CONFIGURATION
@@ -25,6 +34,7 @@ VECTOR_STORE = "chromadb"
 COLLECTION_NAME = "university_services_docs"
 
 _MODEL_CACHE = None
+_MODEL_LOAD_ATTEMPTED = False
 
 
 class LocalVectorCollection:
@@ -95,18 +105,55 @@ class LocalVectorCollection:
 
 def get_embedding_model():
     """Lấy hoặc khởi tạo embedding model."""
-    global _MODEL_CACHE
+    global _MODEL_CACHE, _MODEL_LOAD_ATTEMPTED
+    if _MODEL_LOAD_ATTEMPTED:
+        return _MODEL_CACHE
+
+    _MODEL_LOAD_ATTEMPTED = True
+    allow_download = os.getenv("ALLOW_MODEL_DOWNLOAD", "0").strip() == "1"
+    if not allow_download and not MODEL_CACHE_DIR.exists():
+        return None
     if _MODEL_CACHE is None:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
-            _MODEL_CACHE = SentenceTransformer(EMBEDDING_MODEL)
+            _MODEL_CACHE = SentenceTransformer(
+                EMBEDDING_MODEL,
+                cache_folder=str(MODEL_CACHE_DIR),
+                local_files_only=not allow_download,
+            )
         except Exception:
             try:
                 from sentence_transformers import SentenceTransformer  # type: ignore
-                _MODEL_CACHE = SentenceTransformer("all-MiniLM-L6-v2")
+                _MODEL_CACHE = SentenceTransformer(
+                    "all-MiniLM-L6-v2",
+                    cache_folder=str(MODEL_CACHE_DIR),
+                    local_files_only=not allow_download,
+                )
             except Exception:
                 _MODEL_CACHE = None
     return _MODEL_CACHE
+
+
+def fallback_embedding(text: str, dimension: int = EMBEDDING_DIM) -> list[float]:
+    """Create a deterministic local feature-hashing embedding.
+
+    This is an offline fallback, not a replacement for BGE-M3. Unlike Python's
+    built-in ``hash()``, BLAKE2 is stable across processes, so indexed document
+    vectors remain compatible with query vectors after restarting the app.
+    """
+    vector = [0.0] * dimension
+    tokens = re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
+    for token in tokens:
+        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+        value = int.from_bytes(digest, "big")
+        index = value % dimension
+        sign = 1.0 if (value >> 1) & 1 else -1.0
+        vector[index] += sign
+
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm:
+        vector = [value / norm for value in vector]
+    return vector
 
 
 def get_collection():
@@ -214,11 +261,9 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
         for chunk, emb in zip(chunks, embeddings):
             chunk["embedding"] = emb.tolist() if hasattr(emb, "tolist") else list(emb)
     else:
-        # Fallback hash-based vector generator for consistent cosine similarity
+        # Offline deterministic fallback when sentence-transformers is unavailable.
         for chunk in chunks:
-            text = chunk["content"]
-            vec = [(hash(text + str(i)) % 1000) / 1000.0 for i in range(EMBEDDING_DIM)]
-            chunk["embedding"] = vec
+            chunk["embedding"] = fallback_embedding(chunk["content"])
     return chunks
 
 

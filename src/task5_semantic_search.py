@@ -26,7 +26,11 @@ def semantic_search(query: str, top_k: int = 10) -> list[dict]:
         }
         Sorted by score descending.
     """
-    from src.task4_chunking_indexing import get_collection, get_embedding_model
+    from src.task4_chunking_indexing import (
+        fallback_embedding,
+        get_collection,
+        get_embedding_model,
+    )
 
     model = get_embedding_model()
     collection = get_collection()
@@ -47,17 +51,16 @@ def semantic_search(query: str, top_k: int = 10) -> list[dict]:
     if model:
         query_vector = model.encode(query)
         query_embeddings = [query_vector.tolist() if hasattr(query_vector, "tolist") else list(query_vector)]
-        results = collection.query(
-            query_embeddings=query_embeddings,
-            n_results=actual_top_k,
-            include=["documents", "metadatas", "distances"],
-        )
     else:
-        results = collection.query(
-            query_texts=[query],
-            n_results=actual_top_k,
-            include=["documents", "metadatas", "distances"],
-        )
+        # Never pass query_texts here: Chroma would silently invoke its default
+        # ONNX embedding function and download into the user profile cache.
+        query_embeddings = [fallback_embedding(query)]
+
+    results = collection.query(
+        query_embeddings=query_embeddings,
+        n_results=actual_top_k,
+        include=["documents", "metadatas", "distances"],
+    )
 
     output = []
     if results and results.get("documents") and len(results["documents"]) > 0:

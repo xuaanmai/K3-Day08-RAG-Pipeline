@@ -16,6 +16,7 @@ BM25 hoạt động thế nào:
 """
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,20 @@ def _load_corpus() -> list[dict]:
     Ưu tiên load từ standardized vì đó là output chuẩn hoá của Task 3.
     Nếu standardized rỗng (Task 3 chưa chạy), load từ landing/news JSON.
     """
+    # Reuse Task 4's curated document selection and heading-aware chunking so
+    # dense and lexical retrievers search the same evidence units.
+    try:
+        from src.task4_chunking_indexing import chunk_documents, load_documents
+
+        curated_chunks = chunk_documents(load_documents())
+        if curated_chunks:
+            return [
+                {"content": item["content"], "metadata": item.get("metadata", {})}
+                for item in curated_chunks
+            ]
+    except Exception:
+        pass
+
     corpus: list[dict] = []
 
     # ── Primary: load từ standardized .md files (output của Task 3) ──
@@ -86,6 +101,22 @@ def _load_corpus() -> list[dict]:
 # BM25 Index
 # ===========================================================================
 
+def _tokenize(text: str) -> list[str]:
+    """Unicode-aware tokens without Markdown/punctuation noise."""
+    return re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
+
+
+def _indexable_text(document: dict) -> str:
+    metadata = document.get("metadata") or {}
+    headings = " ".join(
+        str(metadata.get(key, ""))
+        for key in ("heading_1", "heading_2", "heading_3", "heading_4")
+    )
+    # Repeat structural labels once so exact band/criterion matches receive a
+    # modest boost without overwhelming the actual passage text.
+    return f"{headings} {headings} {document.get('content', '')}"
+
+
 def build_bm25_index(corpus: list[dict]) -> BM25Okapi:
     """
     Xây dựng BM25 index từ corpus.
@@ -96,7 +127,7 @@ def build_bm25_index(corpus: list[dict]) -> BM25Okapi:
     Returns:
         BM25Okapi index object
     """
-    tokenized_corpus = [doc["content"].lower().split() for doc in corpus]
+    tokenized_corpus = [_tokenize(_indexable_text(doc)) for doc in corpus]
     bm25 = BM25Okapi(tokenized_corpus)
     return bm25
 
@@ -138,7 +169,7 @@ def lexical_search(query: str, top_k: int = 10) -> list[dict]:
     if not _corpus or _bm25_index is None:
         return []
 
-    tokenized_query = query.lower().split()
+    tokenized_query = _tokenize(query)
     scores = _bm25_index.get_scores(tokenized_query)
 
     top_indices = np.argsort(scores)[::-1][:top_k]

@@ -17,6 +17,8 @@ data/_tmp_pdf/
 *.tmp
 pageindex_doc_ids.json
 pageindex_pdfs/
+chroma_db/
+group_project/evaluation/generation_cache.json
 
 # IDE
 .vscode/

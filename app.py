@@ -81,15 +81,40 @@ if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
 
 
+def _friendly_source_name(value: object, fallback: str) -> str:
+    labels = {
+        "ielts_writing_band_descriptors": "IELTS Writing Band Descriptors, 2023",
+        "ielts_speaking_band_descriptors": "IELTS Speaking Band Descriptors",
+        "guide_to_ielts_scores_2025": "Guide to IELTS Scores, 2025",
+        "guide-to-ielts-scores-2025": "Guide to IELTS Scores, 2025",
+        "general_training_writing_samples": "IELTS General Training Writing Samples",
+        "general-training-writing-sample-candidate-responses-and-examiner-comments": (
+            "IELTS General Training Writing Samples & Examiner Comments"
+        ),
+    }
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    filename = raw.replace("\\", "/").rsplit("/", 1)[-1]
+    stem = filename.rsplit(".", 1)[0]
+    if stem.casefold() in labels:
+        return labels[stem.casefold()]
+    if raw.startswith(("http://", "https://")) or (" " in raw and "_" not in raw):
+        return raw
+    return stem.replace("_", " ").replace("-", " ").strip().title() or fallback
+
+
 def _source_info(item: dict, index: int) -> tuple[str, str, float]:
+
     metadata = item.get("metadata") or {}
-    name = (
+    raw_name = (
         metadata.get("title")
         or metadata.get("source")
         or metadata.get("filename")
         or item.get("title")
         or f"Tài liệu {index}"
     )
+    name = _friendly_source_name(raw_name, fallback=f"Tài liệu {index}")
     kind = metadata.get("document_type") or metadata.get("type") or "IELTS Writing"
     try:
         score = float(item.get("score", 0))
@@ -205,6 +230,10 @@ query = typed_query or st.session_state.pending_query
 if query:
     st.session_state.pending_query = None
     scoped_query = f"[Phạm vi IELTS Writing {task_scope}] {query}"
+    conversation_history = [
+        {"role": message["role"], "content": message["content"]}
+        for message in st.session_state.messages[-6:]
+    ]
     st.session_state.messages.append({"role": "user", "content": query})
 
     with st.chat_message("user"):
@@ -215,7 +244,11 @@ if query:
             try:
                 from src.task10_generation import generate_with_citation
 
-                response = generate_with_citation(scoped_query, top_k=top_k)
+                response = generate_with_citation(
+                    scoped_query,
+                    top_k=top_k,
+                    conversation_history=conversation_history,
+                )
                 answer = response.get("answer") or "Không tìm thấy đủ bằng chứng để trả lời."
                 sources = response.get("sources") or []
                 route = response.get("retrieval_source", "unknown")

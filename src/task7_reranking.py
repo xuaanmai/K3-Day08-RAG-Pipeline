@@ -14,47 +14,61 @@ bất kể nội dung đó có thật sự liên quan đến câu hỏi hay khô
 quyết định fallback ở Task 9 — xem ghi chú ở đó.
 """
 
+import math
 from typing import Optional
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+model.eval()
 
 
 def rerank_cross_encoder(
-    query: str, candidates: list[dict], top_k: int = 5
+    query: str,
+    candidates: list[dict],
+    top_k: int = 5,
 ) -> list[dict]:
-    """
-    Rerank candidates sử dụng cross-encoder model.
+    if not candidates:
+        return []
 
-    Args:
-        query: Câu truy vấn
-        candidates: List of {'content': str, 'score': float, 'metadata': dict}
-        top_k: Số lượng kết quả sau rerank
+    pairs = [[query, c["content"]] for c in candidates]
 
-    Returns:
-        List of top_k candidates, re-scored và sorted by rerank_score descending.
-    """
-    # TODO: Implement cross-encoder reranking
-    #
-    # Option A: Jina Reranker API
-    # import requests
-    # response = requests.post(
-    #     "https://api.jina.ai/v1/rerank",
-    #     headers={"Authorization": f"Bearer {JINA_API_KEY}"},
-    #     json={
-    #         "model": "jina-reranker-v2-base-multilingual",
-    #         "query": query,
-    #         "documents": [c["content"] for c in candidates],
-    #         "top_n": top_k
-    #     }
-    # )
-    # reranked = response.json()["results"]
-    # return [
-    #     {**candidates[r["index"]], "score": r["relevance_score"]}
-    #     for r in reranked
-    # ]
-    #
-    # Option B: Local model (Qwen3-Reranker)
-    # from transformers import AutoModelForSequenceClassification, AutoTokenizer
-    # ...
-    raise NotImplementedError("Implement rerank_cross_encoder")
+    with torch.no_grad():
+        inputs = tokenizer(
+            pairs,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+            max_length=512,
+        )
+
+        scores = model(**inputs).logits.squeeze(-1).cpu().tolist()
+
+    reranked = []
+
+    for candidate, score in zip(candidates, scores):
+        item = candidate.copy()
+        item["score"] = float(score)
+        reranked.append(item)
+
+    reranked.sort(key=lambda x: x["score"], reverse=True)
+
+    return reranked[:top_k]
+
+
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+
+    return dot / (norm1 * norm2)
 
 
 def rerank_mmr(
@@ -77,37 +91,51 @@ def rerank_mmr(
     Returns:
         List of top_k candidates selected by MMR.
     """
-    # TODO: Implement MMR
-    #
-    # selected = []
-    # remaining = list(range(len(candidates)))
-    #
-    # for _ in range(min(top_k, len(candidates))):
-    #     best_idx = None
-    #     best_score = float('-inf')
-    #
-    #     for idx in remaining:
-    #         # Relevance to query
-    #         relevance = cosine_sim(query_embedding, candidates[idx]["embedding"])
-    #
-    #         # Max similarity to already selected
-    #         max_sim_to_selected = 0
-    #         for sel_idx in selected:
-    #             sim = cosine_sim(candidates[idx]["embedding"], candidates[sel_idx]["embedding"])
-    #             max_sim_to_selected = max(max_sim_to_selected, sim)
-    #
-    #         # MMR score
-    #         mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim_to_selected
-    #
-    #         if mmr_score > best_score:
-    #             best_score = mmr_score
-    #             best_idx = idx
-    #
-    #     selected.append(best_idx)
-    #     remaining.remove(best_idx)
-    #
-    # return [candidates[i] for i in selected]
-    raise NotImplementedError("Implement rerank_mmr")
+    if not candidates:
+        return []
+
+    top_k = min(top_k, len(candidates))
+
+    selected_indices = []
+    selected_results = []
+    remaining = list(range(len(candidates)))
+
+    while len(selected_indices) < top_k:
+        best_idx = None
+        best_score = float("-inf")
+
+        for idx in remaining:
+            relevance = cosine_similarity(
+                query_embedding,
+                candidates[idx]["embedding"],
+            )
+
+            if selected_indices:
+                max_sim = max(
+                    cosine_similarity(
+                        candidates[idx]["embedding"],
+                        candidates[s]["embedding"],
+                    )
+                    for s in selected_indices
+                )
+            else:
+                max_sim = 0.0
+
+            mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim
+
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_idx = idx
+
+        item = candidates[best_idx].copy()
+        item["score"] = best_score          # cập nhật score thành MMR score
+        item["mmr_score"] = best_score
+
+        selected_results.append(item)
+        selected_indices.append(best_idx)
+        remaining.remove(best_idx)
+
+    return selected_results
 
 
 def rerank_rrf(

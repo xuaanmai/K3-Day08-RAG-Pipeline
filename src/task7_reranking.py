@@ -15,48 +15,156 @@ quyết định fallback ở Task 9 — xem ghi chú ở đó.
 """
 
 import math
+import os
+import re
 from typing import Optional
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+try:
+    import torch  # type: ignore
+except ImportError:  # pragma: no cover - dependency may be absent
+    torch = None
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-model.eval()
+try:
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+except ImportError:  # pragma: no cover - dependency may be absent
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+
+try:
+    import requests
+except ImportError:  # pragma: no cover - dependency may be absent
+    requests = None
+
+# MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+
+# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+# model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+# model.eval()
 
 
-def rerank_cross_encoder(
-    query: str,
-    candidates: list[dict],
-    top_k: int = 5,
-) -> list[dict]:
+# def rerank_cross_encoder(
+#     query: str,
+#     candidates: list[dict],
+#     top_k: int = 5,
+# ) -> list[dict]:
+#     if not candidates:
+#         return []
+
+#     pairs = [[query, c["content"]] for c in candidates]
+
+#     with torch.no_grad():
+#         inputs = tokenizer(
+#             pairs,
+#             padding=True,
+#             truncation=True,
+#             return_tensors="pt",
+#             max_length=512,
+#         )
+
+#         scores = model(**inputs).logits.squeeze(-1).cpu().tolist()
+
+#     reranked = []
+
+#     for candidate, score in zip(candidates, scores):
+#         item = candidate.copy()
+#         item["score"] = float(score)
+#         reranked.append(item)
+
+#     reranked.sort(key=lambda x: x["score"], reverse=True)
+
+#     return reranked[:top_k]
+JINA_API_KEY = os.getenv("JINA_API_KEY")
+
+
+def _keyword_overlap_score(query: str, content: str) -> float:
+    """Simple lexical overlap bonus for fallback reranking."""
+    if not query or not content:
+        return 0.0
+
+    query_tokens = {
+        token.lower()
+        for token in re.findall(r"\w+", query)
+        if token and token.isalnum()
+    }
+    content_tokens = {
+        token.lower()
+        for token in re.findall(r"\w+", content)
+        if token and token.isalnum()
+    }
+
+    if not query_tokens:
+        return 0.0
+
+    overlap = len(query_tokens & content_tokens) / len(query_tokens)
+    return overlap
+
+
+def _simple_rerank(query: str, candidates: list[dict], top_k: int = 5) -> list[dict]:
+    """Fallback reranking that uses original scores plus lexical overlap."""
     if not candidates:
         return []
 
-    pairs = [[query, c["content"]] for c in candidates]
+    ranked = []
+    for candidate in candidates:
+        item = candidate.copy()
+        base_score = float(item.get("score", 0.0))
+        overlap = _keyword_overlap_score(query, str(item.get("content", "")))
+        item["score"] = base_score + overlap
+        ranked.append(item)
 
-    with torch.no_grad():
-        inputs = tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512,
-        )
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked[: min(top_k, len(ranked))]
 
-        scores = model(**inputs).logits.squeeze(-1).cpu().tolist()
+
+def rerank_cross_encoder(
+    query: str, candidates: list[dict], top_k: int = 5
+) -> list[dict]:
+    """
+    Rerank candidates using Jina Cross-Encoder.
+
+    Args:
+        query: User query.
+        candidates: List of {
+            "content": str,
+            "score": float,
+            "metadata": dict
+        }
+        top_k: Number of results to return.
+
+    Returns:
+        List of candidates sorted by rerank score.
+    """
+    if not candidates:
+        return []
+
+    if not JINA_API_KEY or requests is None:
+        return _simple_rerank(query, candidates, top_k)
+
+    response = requests.post(
+        "https://api.jina.ai/v1/rerank",
+        headers={
+            "Authorization": f"Bearer {JINA_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "jina-reranker-v2-base-multilingual",
+            "query": query,
+            "documents": [c["content"] for c in candidates],
+            "top_n": min(top_k, len(candidates)),
+        },
+        timeout=60,
+    )
+
+    response.raise_for_status()
+    results = response.json()["results"]
 
     reranked = []
-
-    for candidate, score in zip(candidates, scores):
-        item = candidate.copy()
-        item["score"] = float(score)
+    for r in results:
+        item = candidates[r["index"]].copy()
+        item["score"] = r["relevance_score"]
         reranked.append(item)
 
-    reranked.sort(key=lambda x: x["score"], reverse=True)
-
-    return reranked[:top_k]
+    return reranked
 
 
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
@@ -154,28 +262,38 @@ def rerank_rrf(
     Returns:
         List of top_k candidates sorted by RRF score descending.
     """
-    # TODO: Implement RRF
-    #
-    # rrf_scores = {}  # content -> score
-    # content_map = {}  # content -> full dict
-    #
-    # for ranked_list in ranked_lists:
-    #     for rank, item in enumerate(ranked_list, 1):
-    #         key = item["content"]
-    #         rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (k + rank)
-    #         content_map[key] = item
-    #
-    # # Sort by RRF score
-    # sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-    #
-    # results = []
-    # for content, score in sorted_items[:top_k]:
-    #     item = content_map[content].copy()
-    #     item["score"] = score
-    #     results.append(item)
-    #
-    # return results
-    raise NotImplementedError("Implement rerank_rrf")
+    if not ranked_lists:
+        return []
+
+    if ranked_lists and ranked_lists[0] and isinstance(ranked_lists[0], dict):
+        ranked_lists = [ranked_lists]
+
+    rrf_scores: dict[str, float] = {}
+    content_map: dict[str, dict] = {}
+
+    for ranked_list in ranked_lists:
+        if not ranked_list:
+            continue
+
+        for rank, item in enumerate(ranked_list, 1):
+            content = str(item.get("content") or item.get("id") or "")
+            if not content:
+                continue
+
+            rrf_scores[content] = rrf_scores.get(content, 0.0) + 1.0 / (k + rank)
+            content_map[content] = item.copy()
+
+    if not rrf_scores:
+        return []
+
+    sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+    results = []
+    for content, score in sorted_items[: min(top_k, len(sorted_items))]:
+        item = content_map[content].copy()
+        item["score"] = float(score)
+        results.append(item)
+
+    return results
 
 
 # =============================================================================
@@ -206,8 +324,9 @@ def rerank(
         # Cần query_embedding - embed query trước
         raise NotImplementedError("Call rerank_mmr with query_embedding")
     elif method == "rrf":
-        # RRF cần nhiều ranked lists - gọi riêng
-        raise NotImplementedError("Call rerank_rrf with ranked_lists")
+        if candidates and isinstance(candidates[0], list):
+            return rerank_rrf(candidates, top_k=top_k)
+        return _simple_rerank(query, candidates, top_k)
     else:
         raise ValueError(f"Unknown rerank method: {method}")
 

@@ -145,7 +145,11 @@ with st.sidebar:
     st.caption("Band Descriptors · Essay Samples · Examiner Comments")
 
 
-has_key = bool(os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY"))
+has_key = bool(
+    os.getenv("GEMINI_API_KEY")
+    or os.getenv("OPENROUTER_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
+)
 key_class = "" if has_key else "warn"
 key_text = "LLM đã cấu hình" if has_key else "Chưa có LLM API key"
 

@@ -35,44 +35,6 @@ try:
 except ImportError:  # pragma: no cover - dependency may be absent
     requests = None
 
-# MODEL_NAME = "BAAI/bge-reranker-v2-m3"
-
-# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-# model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-# model.eval()
-
-
-# def rerank_cross_encoder(
-#     query: str,
-#     candidates: list[dict],
-#     top_k: int = 5,
-# ) -> list[dict]:
-#     if not candidates:
-#         return []
-
-#     pairs = [[query, c["content"]] for c in candidates]
-
-#     with torch.no_grad():
-#         inputs = tokenizer(
-#             pairs,
-#             padding=True,
-#             truncation=True,
-#             return_tensors="pt",
-#             max_length=512,
-#         )
-
-#         scores = model(**inputs).logits.squeeze(-1).cpu().tolist()
-
-#     reranked = []
-
-#     for candidate, score in zip(candidates, scores):
-#         item = candidate.copy()
-#         item["score"] = float(score)
-#         reranked.append(item)
-
-#     reranked.sort(key=lambda x: x["score"], reverse=True)
-
-#     return reranked[:top_k]
 JINA_API_KEY = os.getenv("JINA_API_KEY")
 
 
@@ -262,37 +224,49 @@ def rerank_rrf(
     Returns:
         List of top_k candidates sorted by RRF score descending.
     """
-    if not ranked_lists:
+    if top_k <= 0 or not ranked_lists:
         return []
-
-    if ranked_lists and ranked_lists[0] and isinstance(ranked_lists[0], dict):
-        ranked_lists = [ranked_lists]
+    if k < 0:
+        raise ValueError("k must be greater than or equal to 0")
 
     rrf_scores: dict[str, float] = {}
     content_map: dict[str, dict] = {}
+    first_seen: dict[str, int] = {}
+    seen_order = 0
 
     for ranked_list in ranked_lists:
         if not ranked_list:
             continue
 
-        for rank, item in enumerate(ranked_list, 1):
-            content = str(item.get("content") or item.get("id") or "")
-            if not content:
+        # Một document chỉ được đóng góp một lần trong mỗi ranked list. Điều này
+        # tránh việc dữ liệu trùng lặp trong cùng retriever làm tăng điểm giả tạo.
+        seen_in_list: set[str] = set()
+        for rank, item in enumerate(ranked_list, start=1):
+            content = item.get("content")
+            if not isinstance(content, str) or not content.strip():
                 continue
+            if content in seen_in_list:
+                continue
+            seen_in_list.add(content)
 
             rrf_scores[content] = rrf_scores.get(content, 0.0) + 1.0 / (k + rank)
-            content_map[content] = item.copy()
+            if content not in content_map:
+                # Giữ phiên bản xuất hiện ở thứ hạng cao nhất đầu tiên; thường đây
+                # là bản có metadata/score gốc đáng tin cậy nhất.
+                content_map[content] = item
+                first_seen[content] = seen_order
+                seen_order += 1
 
-    if not rrf_scores:
-        return []
+    ordered_contents = sorted(
+        rrf_scores,
+        key=lambda content: (-rrf_scores[content], first_seen[content]),
+    )
 
-    sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
     results = []
-    for content, score in sorted_items[: min(top_k, len(sorted_items))]:
-        item = content_map[content].copy()
-        item["score"] = float(score)
-        results.append(item)
-
+    for content in ordered_contents[:top_k]:
+        result = content_map[content].copy()
+        result["score"] = rrf_scores[content]
+        results.append(result)
     return results
 
 
@@ -318,15 +292,19 @@ def rerank(
     Returns:
         List of top_k reranked candidates.
     """
-    if method == "cross_encoder":
+    if top_k <= 0 or not candidates:
+        return []
+
+    normalized_method = method.strip().lower()
+    if normalized_method == "cross_encoder":
         return rerank_cross_encoder(query, candidates, top_k)
-    elif method == "mmr":
+    elif normalized_method == "mmr":
         # Cần query_embedding - embed query trước
         raise NotImplementedError("Call rerank_mmr with query_embedding")
-    elif method == "rrf":
-        if candidates and isinstance(candidates[0], list):
-            return rerank_rrf(candidates, top_k=top_k)
-        return _simple_rerank(query, candidates, top_k)
+    elif normalized_method == "rrf":
+        # Interface này nhận một ranked list. Trong hybrid pipeline, hãy gọi
+        # rerank_rrf([dense_results, sparse_results]) trực tiếp để fuse nhiều list.
+        return rerank_rrf([candidates], top_k=top_k)
     else:
         raise ValueError(f"Unknown rerank method: {method}")
 

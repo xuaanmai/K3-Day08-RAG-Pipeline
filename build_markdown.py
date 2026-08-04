@@ -3,6 +3,7 @@ from pypdf import PdfReader
 import re
 
 R=Path(__file__).parent; O=R/'data/processed'; O.mkdir(parents=True,exist_ok=True)
+P=R/'data/landing/legal'
 def y(s): return '---\n'+s.strip()+'\n---\n\n'
 def score(): return '''#### Score
 
@@ -109,7 +110,7 @@ def rows(pdf,pages,cols):
  return d
 
 cols=[(45,260),(260,485),(485,710),(710,1000)]
-d=rows(R/'data/ielts_speaking_band_descriptors.pdf',[1,2,3],cols)
+d=rows(P/'ielts_speaking_band_descriptors.pdf',[1,2,3],cols)
 m=y('''title: IELTS Speaking Band Descriptors
 document_type: band_descriptor
 skill: speaking
@@ -131,8 +132,9 @@ for b in range(9,-1,-1):
 (O/'ielts_speaking_band_descriptors.md').write_text(m,encoding='utf8')
 
 cols=[(45,360),(360,545),(545,740),(740,1000)]
-d1=rows(R/'data/ielts_writing_band_descriptors.pdf',[2,3,4],cols)
-d2=rows(R/'data/ielts_writing_band_descriptors.pdf',[6,7,8],[(45,330),(330,545),(545,740),(740,1000)])
+d1=rows(P/'ielts_writing_band_descriptors.pdf',[2,3,4],cols)
+d2=rows(P/'ielts_writing_band_descriptors.pdf',[6,7],[(45,330),(330,545),(545,740),(740,1000)])
+d2.update(rows(P/'ielts_writing_band_descriptors.pdf',[8],[(45,280),(280,555),(555,755),(755,1000)]))
 m=y('''title: IELTS Writing Band Descriptors
 document_type: band_descriptor
 skill: writing
@@ -162,7 +164,7 @@ year: 2025
 source_organization: IELTS
 official: true
 language: en''')+'# Guide to IELTS Scores 2025\n'
-for n,p in enumerate(PdfReader(R/'data/guide-to-ielts-scores-2025.pdf').pages,1):
+for n,p in enumerate(PdfReader(P/'guide-to-ielts-scores-2025.pdf').pages,1):
  ls=[]
  for q in (p.extract_text() or '').splitlines():
   q=re.sub(r'\s+',' ',q.replace('\x04',' ').replace('\xa0',' ')).strip()

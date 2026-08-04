@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 STANDARDIZED_DIR = Path(__file__).parent.parent / "data" / "standardized"
+PROCESSED_DIR = Path(__file__).parent.parent / "data" / "processed"
 CHROMA_DIR = Path(__file__).parent.parent / "chroma_db"
 
 # =============================================================================
@@ -128,22 +129,37 @@ def get_collection():
 
 def load_documents() -> list[dict]:
     """
-    Đọc toàn bộ markdown files từ data/standardized/.
+    Đọc toàn bộ markdown files đã được chuẩn hoá.
+
+    ``data/standardized`` là output chính thức của Task 3. Một số
+    dataset cũ trong repository dùng tên ``data/processed``; chỉ dùng
+    thư mục này khi ``standardized`` không có file Markdown.
 
     Returns:
         List of {'content': str, 'metadata': {'source': str, 'type': str}}
     """
     documents = []
-    if STANDARDIZED_DIR.exists():
-        for md_file in STANDARDIZED_DIR.rglob("*.md"):
-            content = md_file.read_text(encoding="utf-8")
-            if not content.strip():
-                continue
-            doc_type = "legal" if "legal" in str(md_file) else "news"
-            documents.append({
-                "content": content,
-                "metadata": {"source": md_file.name, "type": doc_type}
-            })
+    standardized_files = sorted(STANDARDIZED_DIR.rglob("*.md")) if STANDARDIZED_DIR.exists() else []
+    source_dir = STANDARDIZED_DIR if standardized_files else PROCESSED_DIR
+    markdown_files = standardized_files or (
+        sorted(PROCESSED_DIR.rglob("*.md")) if PROCESSED_DIR.exists() else []
+    )
+
+    for md_file in markdown_files:
+        content = md_file.read_text(encoding="utf-8")
+        if not content.strip():
+            continue
+
+        relative_path = md_file.relative_to(source_dir)
+        path_parts = {part.lower() for part in relative_path.parts}
+        doc_type = "legal" if "legal" in path_parts else "news" if "news" in path_parts else "document"
+        documents.append({
+            "content": content,
+            "metadata": {
+                "source": relative_path.as_posix(),
+                "type": doc_type,
+            },
+        })
     return documents
 
 
@@ -188,6 +204,9 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     Returns:
         Mỗi chunk dict được thêm key 'embedding': list[float]
     """
+    if not chunks:
+        return []
+
     model = get_embedding_model()
     texts = [c["content"] for c in chunks]
     if model:
@@ -229,6 +248,11 @@ def run_pipeline():
     print("=" * 50)
 
     docs = load_documents()
+    if not docs:
+        raise RuntimeError(
+            "No Markdown documents found. Run Task 3 first so that "
+            "data/standardized/ contains .md files (or provide files in data/processed/)."
+        )
     print(f"\n[OK] Loaded {len(docs)} documents")
 
     chunks = chunk_documents(docs)

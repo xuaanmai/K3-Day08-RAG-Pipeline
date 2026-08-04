@@ -1,17 +1,92 @@
 [
   {
-    "question": "Học phí hàng năm của chương trình Business tại RMIT Vietnam là bao nhiêu?",
-    "expected_answer": "Khoảng 375.840.000 VND mỗi năm (tùy chương trình cụ thể).",
-    "expected_context": "Trang Tuition Fees, mục Undergraduate Programs"
+    "question": "Band 9 trong IELTS Listening thể hiện điều gì?",
+    "expected_answer": "Band 9 thể hiện người thi có thể hiểu toàn bộ ý nghĩa và chi tiết phức tạp, ngay cả khi thông tin được trình bày ở dạng khó hoặc có nhiều cách diễn đạt khác nhau.",
+    "expected_context": "IELTS Listening Band Descriptors, Band 9"
   },
   {
-    "question": "Học phí được thanh toán theo hình thức nào?",
-    "expected_answer": "Thanh toán theo từng học kỳ, tính theo từng môn học đã đăng ký.",
-    "expected_context": "Trang Tuition Fees, mục Payment Structure"
+    "question": "Đặc điểm chính của band 6 trong IELTS Speaking là gì?",
+    "expected_answer": "Band 6 thể hiện khả năng giao tiếp khá ổn định, có thể sử dụng ngôn ngữ linh hoạt ở mức trung bình và giải quyết hầu hết các tình huống giao tiếp, dù đôi lúc còn lỗi hoặc không tự nhiên.",
+    "expected_context": "IELTS Speaking Band Descriptors, Band 6"
   },
   {
-    "question": "Trường có cung cấp ký túc xá trong khuôn viên không?",
-    "expected_answer": "Không — trường không cung cấp chỗ ở trong khuôn viên, nhưng có đội ngũ hỗ trợ sinh viên tìm chỗ ở gần trường.",
-    "expected_context": "Trang Accommodation Services"
+    "question": "Ở band 5, người học thường gặp khó khăn gì trong IELTS Writing?",
+    "expected_answer": "Ở band 5, người học có thể viết đủ ý cơ bản nhưng thường có cấu trúc chưa rõ ràng, từ vựng giới hạn và mắc nhiều lỗi ngữ pháp làm ảnh hưởng đến sự mạch lạc.",
+    "expected_context": "IELTS Writing Band Descriptors, Band 5"
+  },
+  {
+    "question": "Band 7 trong IELTS Reading đánh giá người thi ở mức độ nào?",
+    "expected_answer": "Band 7 cho thấy người thi có khả năng hiểu ý chính và chi tiết quan trọng trong văn bản khó, dù có thể vẫn mắc một số lỗi nhỏ hoặc khó khăn với một số phần phức tạp.",
+    "expected_context": "IELTS Reading Band Descriptors, Band 7"
+  },
+  {
+    "question": "Sự khác biệt giữa band 6 và band 7 trong IELTS Writing là gì?",
+    "expected_answer": "Band 7 thường có khả năng tổ chức ý rõ ràng hơn, sử dụng từ vựng phong phú hơn và ít lỗi ngữ pháp hơn so với band 6.",
+    "expected_context": "IELTS Writing Band Descriptors, Bands 6-7"
+  },
+  {
+    "question": "Band 8 trong IELTS Speaking thường có những đặc điểm nào?",
+    "expected_answer": "Band 8 thể hiện khả năng nói lưu loát, tự nhiên, có thể phản ứng linh hoạt và sử dụng ngôn ngữ đa dạng với lỗi rất ít.",
+    "expected_context": "IELTS Speaking Band Descriptors, Band 8"
+  },
+  {
+    "question": "Điểm khác biệt giữa band 4 và band 5 trong IELTS Listening là gì?",
+    "expected_answer": "Band 5 có thể hiểu được ý chính và thông tin quan trọng trong nhiều tình huống, trong khi band 4 thường chỉ hiểu được phần đơn giản và dễ bị bỏ sót chi tiết.",
+    "expected_context": "IELTS Listening Band Descriptors, Bands 4-5"
+  },
+  {
+    "question": "Band 6 trong IELTS Reading có thể làm được gì?",
+    "expected_answer": "Band 6 có thể hiểu ý chính và nhiều chi tiết quan trọng trong văn bản, nhưng có thể gặp khó khăn với các câu hỏi đòi hỏi suy luận sâu hoặc hiểu ngữ nghĩa phức tạp.",
+    "expected_context": "IELTS Reading Band Descriptors, Band 6"
+  },
+  {
+    "question": "Band 9 trong IELTS Writing thể hiện điều gì về cách trình bày?",
+    "expected_answer": "Band 9 thể hiện bài viết rất mạch lạc, logic, có cách dùng từ và cấu trúc câu rất chính xác, phù hợp và tự nhiên.",
+    "expected_context": "IELTS Writing Band Descriptors, Band 9"
+  },
+  {
+    "question": "Một thí sinh ở band 5 trong IELTS Speaking thường có thể làm gì?",
+    "expected_answer": "Họ có thể giao tiếp ở mức cơ bản, trả lời được nhiều câu hỏi nhưng thường cần suy nghĩ lâu hơn và có thể dùng từ vựng giới hạn.",
+    "expected_context": "IELTS Speaking Band Descriptors, Band 5"
+  },
+  {
+    "question": "Band 7 trong IELTS Listening thể hiện khả năng gì?",
+    "expected_answer": "Band 7 cho thấy thí sinh có thể hiểu được hầu hết ý chính và nhiều chi tiết, dù vẫn có thể bỏ sót một số chi tiết nhỏ trong các đoạn khó.",
+    "expected_context": "IELTS Listening Band Descriptors, Band 7"
+  },
+  {
+    "question": "Band 6 trong IELTS Writing thường có những đặc điểm nào?",
+    "expected_answer": "Band 6 thường có bài viết đủ ý và có tổ chức tốt ở mức cơ bản, nhưng vẫn có lỗi ngữ pháp và từ vựng chưa thật sự đa dạng.",
+    "expected_context": "IELTS Writing Band Descriptors, Band 6"
+  },
+  {
+    "question": "Điểm khác biệt giữa band 8 và band 9 trong IELTS Reading là gì?",
+    "expected_answer": "Band 9 có thể hiểu sâu và chính xác hơn, bao gồm cả ý nghĩa ẩn và chi tiết khó, trong khi band 8 vẫn có thể có một số chỗ chưa hoàn toàn chính xác.",
+    "expected_context": "IELTS Reading Band Descriptors, Bands 8-9"
+  },
+  {
+    "question": "Band 4 trong IELTS Speaking thường bị hạn chế ở điểm nào?",
+    "expected_answer": "Band 4 thường có khả năng giao tiếp giới hạn, câu trả lời ngắn, từ vựng hạn chế và nhiều lỗi làm khó khăn cho người nghe hiểu.",
+    "expected_context": "IELTS Speaking Band Descriptors, Band 4"
+  },
+  {
+    "question": "Một thí sinh band 7 trong IELTS Writing có thể làm được gì tốt hơn band 6?",
+    "expected_answer": "Họ có thể viết mạch lạc hơn, triển khai ý tốt hơn, sử dụng từ vựng và cấu trúc câu phù hợp và chính xác hơn.",
+    "expected_context": "IELTS Writing Band Descriptors, Band 7"
+  },
+  {
+    "question": "Band 8 trong IELTS Listening thể hiện yêu cầu cao ở mức nào?",
+    "expected_answer": "Band 8 cho thấy thí sinh có thể hiểu ý chính và hầu hết chi tiết quan trọng, kể cả trong các đoạn nói có nhiều thông tin và khó hiểu.",
+    "expected_context": "IELTS Listening Band Descriptors, Band 8"
+  },
+  {
+    "question": "Band 5 trong IELTS Reading thường có đặc điểm gì?",
+    "expected_answer": "Band 5 có thể hiểu được ý chính ở mức cơ bản nhưng thường gặp khó khăn với các chi tiết phức tạp, câu hỏi suy luận và nghĩa bóng.",
+    "expected_context": "IELTS Reading Band Descriptors, Band 5"
+  },
+  {
+    "question": "Band 6 trong IELTS Speaking có thể được mô tả như thế nào?",
+    "expected_answer": "Band 6 là mức có thể giao tiếp khá hiệu quả, dù có lúc phải dừng lại để suy nghĩ hoặc tự sửa câu, nhưng vẫn duy trì được chủ đề chính.",
+    "expected_context": "IELTS Speaking Band Descriptors, Band 6"
   }
 ]

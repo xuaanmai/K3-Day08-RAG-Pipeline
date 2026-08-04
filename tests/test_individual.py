@@ -36,7 +36,7 @@ class TestTask1(unittest.TestCase):
 
     def test_minimum_3_legal_files(self):
         """Có tối thiểu 3 file PDF/DOCX trong data/landing/legal/"""
-        legal_dir = DATA_DIR / "landing" / "standardized" / "legal"
+        legal_dir = DATA_DIR / "landing" / "legal"
         if not legal_dir.exists():
             self.skipTest("data/landing/legal/ chưa tồn tại")
 
@@ -78,7 +78,7 @@ class TestTask2(unittest.TestCase):
 
     def test_minimum_5_news_files(self):
         """Có tối thiểu 5 file trong data/landing/news/"""
-        news_dir = DATA_DIR / "landing" / "standardized" / "news"
+        news_dir = DATA_DIR / "landing" / "news"
         if not news_dir.exists():
             self.skipTest("data/landing/news/ chưa tồn tại")
 

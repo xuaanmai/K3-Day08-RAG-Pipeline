@@ -15,48 +15,118 @@ quyết định fallback ở Task 9 — xem ghi chú ở đó.
 """
 
 import math
+import os
+import re
 from typing import Optional
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+try:
+    import torch  # type: ignore
+except ImportError:  # pragma: no cover - dependency may be absent
+    torch = None
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-model.eval()
+try:
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+except ImportError:  # pragma: no cover - dependency may be absent
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+
+try:
+    import requests
+except ImportError:  # pragma: no cover - dependency may be absent
+    requests = None
+
+JINA_API_KEY = os.getenv("JINA_API_KEY")
 
 
-def rerank_cross_encoder(
-    query: str,
-    candidates: list[dict],
-    top_k: int = 5,
-) -> list[dict]:
+def _keyword_overlap_score(query: str, content: str) -> float:
+    """Simple lexical overlap bonus for fallback reranking."""
+    if not query or not content:
+        return 0.0
+
+    query_tokens = {
+        token.lower()
+        for token in re.findall(r"\w+", query)
+        if token and token.isalnum()
+    }
+    content_tokens = {
+        token.lower()
+        for token in re.findall(r"\w+", content)
+        if token and token.isalnum()
+    }
+
+    if not query_tokens:
+        return 0.0
+
+    overlap = len(query_tokens & content_tokens) / len(query_tokens)
+    return overlap
+
+
+def _simple_rerank(query: str, candidates: list[dict], top_k: int = 5) -> list[dict]:
+    """Fallback reranking that uses original scores plus lexical overlap."""
     if not candidates:
         return []
 
-    pairs = [[query, c["content"]] for c in candidates]
+    ranked = []
+    for candidate in candidates:
+        item = candidate.copy()
+        base_score = float(item.get("score", 0.0))
+        overlap = _keyword_overlap_score(query, str(item.get("content", "")))
+        item["score"] = base_score + overlap
+        ranked.append(item)
 
-    with torch.no_grad():
-        inputs = tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512,
-        )
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked[: min(top_k, len(ranked))]
 
-        scores = model(**inputs).logits.squeeze(-1).cpu().tolist()
+
+def rerank_cross_encoder(
+    query: str, candidates: list[dict], top_k: int = 5
+) -> list[dict]:
+    """
+    Rerank candidates using Jina Cross-Encoder.
+
+    Args:
+        query: User query.
+        candidates: List of {
+            "content": str,
+            "score": float,
+            "metadata": dict
+        }
+        top_k: Number of results to return.
+
+    Returns:
+        List of candidates sorted by rerank score.
+    """
+    if not candidates:
+        return []
+
+    if not JINA_API_KEY or requests is None:
+        return _simple_rerank(query, candidates, top_k)
+
+    response = requests.post(
+        "https://api.jina.ai/v1/rerank",
+        headers={
+            "Authorization": f"Bearer {JINA_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "jina-reranker-v2-base-multilingual",
+            "query": query,
+            "documents": [c["content"] for c in candidates],
+            "top_n": min(top_k, len(candidates)),
+        },
+        timeout=60,
+    )
+
+    response.raise_for_status()
+    results = response.json()["results"]
 
     reranked = []
-
-    for candidate, score in zip(candidates, scores):
-        item = candidate.copy()
-        item["score"] = float(score)
+    for r in results:
+        item = candidates[r["index"]].copy()
+        item["score"] = r["relevance_score"]
         reranked.append(item)
 
-    reranked.sort(key=lambda x: x["score"], reverse=True)
-
-    return reranked[:top_k]
+    return reranked
 
 
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:

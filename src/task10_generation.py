@@ -40,6 +40,7 @@ TOP_P = 0.9
 # temperature: Độ ngẫu nhiên của output
 # Chọn 0.3 vì: RAG cần factual, ít sáng tạo
 TEMPERATURE = 0.3
+MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "3000"))
 
 # Có thể override trong .env. Khi dùng OpenAI trực tiếp, prefix "openai/" sẽ được
 # loại bỏ vì prefix này chỉ thuộc convention model ID của OpenRouter.
@@ -62,12 +63,53 @@ Quy tắc bắt buộc:
    cấp, ví dụ: [IELTS Writing Band Descriptors].
 3. Nếu context không đủ thông tin → trả lời: "Tôi không thể xác minh thông tin này từ nguồn hiện có"
 4. Trả lời bằng tiếng Việt, có cấu trúc rõ ràng; giữ nguyên thuật ngữ IELTS tiếng Anh
-   khi cần thiết.
-5. Không tự chấm band hoặc khẳng định một essay đạt band cụ thể nếu context không có
+   khi cần thiết. Không chỉ dịch hoặc chép lại descriptor: sau mỗi ý, hãy giải
+   thích 1-3 câu về ý nghĩa thực tế đối với người viết.
+5. Được phép giải thích, tổng hợp và nêu ví dụ minh hoạ ngắn dựa trên descriptor,
+   nhưng phải ghi rõ đó là ví dụ minh hoạ chứ không phải trích nguyên văn từ nguồn.
+6. Không tự chấm band hoặc khẳng định một essay đạt band cụ thể nếu context không có
    đủ descriptor hay examiner comment để chứng minh.
-6. Không tạo nguồn, số trang, band score hay trích dẫn không tồn tại trong CONTEXT."""
+7. Không tạo nguồn, số trang, band score hay trích dẫn không tồn tại trong CONTEXT.
+
+Với câu hỏi giải thích hoặc so sánh, ưu tiên cấu trúc sau khi context cho phép:
+- Trả lời ngắn gọn trọng tâm
+- Phân tích chi tiết từng điều kiện/khác biệt
+- Ý nghĩa thực tế hoặc ví dụ minh hoạ
+- Checklist để người học tự kiểm tra
+- Lưu ý về giới hạn của evidence nếu có"""
 
 UNVERIFIED_ANSWER = "Tôi không thể xác minh thông tin này từ nguồn hiện có"
+
+SOURCE_LABELS = {
+    "ielts_writing_band_descriptors": "IELTS Writing Band Descriptors, 2023",
+    "ielts_speaking_band_descriptors": "IELTS Speaking Band Descriptors",
+    "guide_to_ielts_scores_2025": "Guide to IELTS Scores, 2025",
+    "guide-to-ielts-scores-2025": "Guide to IELTS Scores, 2025",
+    "general_training_writing_samples": "IELTS General Training Writing Samples",
+    "general-training-writing-sample-candidate-responses-and-examiner-comments": (
+        "IELTS General Training Writing Samples & Examiner Comments"
+    ),
+}
+
+
+def friendly_source_name(value: object, fallback: str = "IELTS official source") -> str:
+    """Convert a filename/URL-like source into a readable citation label."""
+    if value is None:
+        return fallback
+    raw = str(value).strip()
+    if not raw:
+        return fallback
+
+    filename = raw.replace("\\", "/").rsplit("/", 1)[-1]
+    stem = filename.rsplit(".", 1)[0]
+    known = SOURCE_LABELS.get(stem.casefold())
+    if known:
+        return known
+
+    # Preserve URLs and already human-readable titles.
+    if raw.startswith(("http://", "https://")) or (" " in raw and "_" not in raw):
+        return raw
+    return stem.replace("_", " ").replace("-", " ").strip().title() or fallback
 
 
 # =============================================================================
@@ -127,17 +169,19 @@ def format_context(chunks: list[dict]) -> str:
         metadata = chunk.get("metadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
-        source = (
+        raw_source = (
             metadata.get("title")
             or metadata.get("source")
             or metadata.get("filename")
             or metadata.get("section")
             or f"Source {index}"
         )
+        source = friendly_source_name(raw_source, fallback=f"IELTS Source {index}")
+        source_id = str(raw_source).replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
         doc_type = metadata.get("document_type") or metadata.get("type") or "unknown"
         page = metadata.get("page") or metadata.get("page_index")
 
-        label = f"DOCUMENT {index}\nSOURCE: {source}\nTYPE: {doc_type}"
+        label = f"DOCUMENT {index}\nSOURCE: {source}\nSOURCE_ID: {source_id}\nTYPE: {doc_type}"
         if page is not None:
             label += f"\nPAGE: {page}"
         context_parts.append(f"{label}\nCONTENT:\n{content.strip()}")
@@ -174,7 +218,12 @@ def _llm_configuration() -> tuple[str, str, str]:
 # GENERATION
 # =============================================================================
 
-def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
+def generate_with_citation(
+    query: str,
+    top_k: int = TOP_K,
+    conversation_history: list[dict] | None = None,
+    retrieval_mode: str = "hybrid",
+) -> dict:
     """
     End-to-end RAG generation có citation.
 
@@ -201,7 +250,36 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
     if top_k <= 0:
         raise ValueError("top_k must be greater than 0")
 
-    chunks = retrieve(query.strip(), top_k=top_k)
+    if retrieval_mode not in {"hybrid", "dense_only"}:
+        raise ValueError("retrieval_mode must be 'hybrid' or 'dense_only'")
+
+    history = conversation_history or []
+    recent_history = history[-6:]
+    history_lines = []
+    for message in recent_history:
+        role = str(message.get("role", "user"))
+        content = str(message.get("content", "")).strip()
+        if content:
+            history_lines.append(f"{role}: {content[:800]}")
+
+    # Add recent dialogue to retrieval only when it exists. This resolves short
+    # follow-ups such as "Band 7 thì sao?" without changing standalone queries.
+    retrieval_query = query.strip()
+    if history_lines:
+        retrieval_query = (
+            "Ngữ cảnh hội thoại trước:\n"
+            + "\n".join(history_lines)
+            + f"\nCâu hỏi hiện tại: {query.strip()}"
+        )
+
+    if retrieval_mode == "dense_only":
+        from .task5_semantic_search import semantic_search
+
+        chunks = semantic_search(retrieval_query, top_k=top_k)
+        for chunk in chunks:
+            chunk.setdefault("source", "dense_only")
+    else:
+        chunks = retrieve(retrieval_query, top_k=top_k)
     if not chunks:
         return {
             "answer": UNVERIFIED_ANSWER,
@@ -215,30 +293,49 @@ def generate_with_citation(query: str, top_k: int = TOP_K) -> dict:
         return {
             "answer": UNVERIFIED_ANSWER,
             "sources": chunks,
-            "retrieval_source": chunks[0].get("source", "hybrid"),
+            "retrieval_source": chunks[0].get("source", retrieval_mode),
         }
 
-    user_message = f"""CONTEXT START
+    conversation_block = "\n".join(history_lines) if history_lines else "Không có"
+    user_message = f"""CONVERSATION HISTORY START
+{conversation_block}
+CONVERSATION HISTORY END
+
+CONTEXT START
 {context}
 CONTEXT END
 
 QUESTION:
 {query.strip()}
 
-Trả lời chỉ từ context. Dùng chính xác các giá trị SOURCE trong trích dẫn."""
+Trả lời chỉ từ context. Dùng chính xác các giá trị SOURCE trong trích dẫn.
+Hãy trả lời đủ chi tiết để người học hiểu và áp dụng được, không chỉ liệt kê
+hoặc dịch lại các dòng descriptor. Nếu câu hỏi hiện tại là câu hỏi nối tiếp, hãy dùng
+lịch sử hội thoại để hiểu tham chiếu, nhưng mọi khẳng định vẫn phải dựa trên CONTEXT."""
 
     from openai import OpenAI
 
     api_key, base_url, model = _llm_configuration()
     client = OpenAI(api_key=api_key, base_url=base_url)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    request_options = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
+        "temperature": TEMPERATURE,
+        "top_p": TOP_P,
+        "max_tokens": MAX_TOKENS,
+    }
+    # Gemini 2.5 Flash uses dynamic thinking by default. Thinking tokens share
+    # the output budget and can leave only an introduction visible. This RAG
+    # task needs grounded synthesis, so disable reasoning to reserve the budget
+    # for the user-facing answer. Gemini 2.5 Pro does not support thinking-off.
+    if "generativelanguage.googleapis.com" in base_url and "2.5-pro" not in model:
+        request_options["reasoning_effort"] = "none"
+
+    response = client.chat.completions.create(
+        **request_options,
     )
 
     answer = response.choices[0].message.content
@@ -248,7 +345,8 @@ Trả lời chỉ từ context. Dùng chính xác các giá trị SOURCE trong t
     return {
         "answer": answer.strip(),
         "sources": chunks,
-        "retrieval_source": chunks[0].get("source", "hybrid"),
+        "retrieval_source": chunks[0].get("source", retrieval_mode),
+        "finish_reason": getattr(response.choices[0], "finish_reason", None),
     }
 
 
